@@ -14,7 +14,7 @@ export default function ReviewForm({ restaurantName, path }) {
     const loadReviews = async () => {
       const { data, error } = await supabase
         .from("review")
-        .select("Calificacion, Reseña, created_at")
+        .select("rate, comment, created_at")
         .eq("restaurant", restaurantName) // Filtramos por el nombre del restaurante
         .order("created_at", { ascending: false });
       if (error) {
@@ -24,8 +24,8 @@ export default function ReviewForm({ restaurantName, path }) {
         // Mapeamos los datos de la base de datos a nuestro formato
         setReviews(
           data.map((review) => ({
-            rating: review.Calificacion,
-            comment: review.Reseña,
+            rating: review.rate,
+            comment: review.comment,
             created_at: review.created_at,
           }))
         );
@@ -51,8 +51,8 @@ export default function ReviewForm({ restaurantName, path }) {
       .from("review")
       .insert([
         {
-          Calificacion: rating,
-          Reseña: comment.trim(),
+          rate: rating,
+          comment: comment.trim(),
           restaurant: restaurantName, // Guarda también a qué restaurante pertenece
         },
       ])
@@ -64,8 +64,8 @@ export default function ReviewForm({ restaurantName, path }) {
     } else {
       // Actualizar el estado local con la nueva reseña
       const newReview = {
-        rating: data[0].Calificacion,
-        comment: data[0].Reseña,
+        rating: data[0].rate,
+        comment: data[0].comment,
         created_at: data[0].created_at,
       };
       setReviews([newReview, ...reviews]);
