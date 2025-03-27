@@ -1,59 +1,108 @@
-import { useState, useEffect } from "react";
-import { FaStar, FaRegStar } from "react-icons/fa";
+import { useState, useEffect, useRef } from "react";
+import { FaStar, FaRegStar, FaComment } from "react-icons/fa";
 import { supabase } from "../lib/supabase";
 
 export default function ReviewForm({ restaurantName, path }) {
   const [reviews, setReviews] = useState([]);
+  const [restaurant, setRestaurant] = useState(null);
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [comment, setComment] = useState("");
   const [error, setError] = useState(null);
+  const reviewsRef = useRef(null);
 
-  // Cargar reseñas existentes filtrando por restaurante
+  useEffect(() => {
+    const getRestaurant = async () => {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .select("*")
+        .eq("menu", path);
+      if (error) {
+        console.error("Error al cargar el restaurante:", error);
+        setError("Error al cargar el restaurante");
+        return;
+      }
+      
+      // Si encontramos el restaurante, lo establecemos en el estado
+      if (data && data.length > 0) {
+        setRestaurant(data[0]);
+        return;
+      }
+      
+      // Si no existe el restaurante, lo creamos automáticamente
+      try {
+        const { data: newRestaurant, error: createError } = await supabase
+          .from("restaurants")
+          .insert([{
+            name: restaurantName,
+            menu: path,
+          }])
+          .select();
+          
+        if (createError) {
+          console.error("Error al crear el restaurante:", createError);
+          setError("Error al crear el restaurante");
+          return;
+        }
+        
+        console.log("Restaurante creado automáticamente:", newRestaurant[0]);
+        setRestaurant(newRestaurant[0]);
+      } catch (err) {
+        console.error("Error inesperado al crear el restaurante:", err);
+        setError("Error inesperado al crear el restaurante");
+      }
+    };
+
+    getRestaurant();
+  }, [restaurantName, path]);
+
   useEffect(() => {
     const loadReviews = async () => {
+      if (!restaurant || !restaurant.id) return;
+      
       const { data, error } = await supabase
         .from("review")
         .select("rate, comment, created_at")
-        .eq("restaurant", restaurantName) // Filtramos por el nombre del restaurante
+        .eq("restaurant_id", restaurant.id)
         .order("created_at", { ascending: false });
       if (error) {
         console.error("Error al cargar reseñas:", error);
         setError("Error al cargar reseñas");
       } else {
-        // Mapeamos los datos de la base de datos a nuestro formato
+
         setReviews(
           data.map((review) => ({
             rating: review.rate,
             comment: review.comment,
             created_at: review.created_at,
+            restaurant_id: restaurant.id,
           }))
         );
       }
     };
 
     loadReviews();
-  }, [restaurantName]);
+  }, [restaurant]);
 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
 
-    // Validar que se haya seleccionado una calificación y escrito un comentario
     if (rating === 0 || !comment.trim()) {
       setError("Por favor completa todos los campos");
       return;
     }
 
-    // Inserción en Supabase
     const { data, error } = await supabase
       .from("review")
       .insert([
         {
           rate: rating,
           comment: comment.trim(),
-          restaurant: restaurantName, // Guarda también a qué restaurante pertenece
+
+          restaurant: restaurantName,
+          restaurant_id: restaurant.id,
         },
       ])
       .select();
@@ -62,21 +111,61 @@ export default function ReviewForm({ restaurantName, path }) {
       console.error("Error al insertar la reseña:", error);
       setError("Error al enviar la reseña");
     } else {
-      // Actualizar el estado local con la nueva reseña
+      // Añadir la nueva reseña al estado local
       const newReview = {
         rating: data[0].rate,
         comment: data[0].comment,
         created_at: data[0].created_at,
+        restaurant_id: restaurant.id
       };
-      setReviews([newReview, ...reviews]);
+      
+      // Actualizar el estado de reseñas con la nueva reseña
+      const updatedReviews = [newReview, ...reviews];
+      setReviews(updatedReviews);
+      
+      // Calcular el nuevo promedio de calificaciones
+      const totalRating = updatedReviews.reduce((sum, review) => sum + review.rating, 0);
+      const newAverageRating = totalRating / updatedReviews.length;
+      
+      // Actualizar la columna rating en la tabla restaurants
+      try {
+        const { error: updateError } = await supabase
+          .from("restaurants")
+          .update({ rating: newAverageRating.toFixed(1) })
+          .eq("id", restaurant.id);
+          
+        if (updateError) {
+          console.error("Error al actualizar la calificación del restaurante:", updateError);
+        } else {
+          console.log("Calificación del restaurante actualizada:", newAverageRating.toFixed(1));
+        }
+      } catch (updateErr) {
+        console.error("Error inesperado al actualizar la calificación:", updateErr);
+      }
+      
+      // Limpiar el formulario
       setRating(0);
       setComment("");
     }
   };
 
-  // Cálculo de la calificación promedio (opcional)
   const averageRating =
     reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length || 0;
+
+  const scrollToReviews = () => {
+    reviewsRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  if (!restaurant) {
+    return (
+      <div className="p-4 text-center">
+        <div className="animate-pulse">
+          <p className="text-gray-600 mb-2">Preparando el sistema de reseñas...</p>
+          <p className="text-sm text-gray-500">Estamos configurando este restaurante para recibir reseñas.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -135,7 +224,7 @@ export default function ReviewForm({ restaurantName, path }) {
         </button>
       </form>
 
-      <div className="mt-8">
+      <div className="mt-8" ref={reviewsRef}>
         <h3 className="text-lg font-semibold mb-4">Reseñas anteriores</h3>
 
         {reviews.length > 0 ? (
@@ -158,7 +247,7 @@ export default function ReviewForm({ restaurantName, path }) {
                     </span>
                   )}
                 </div>
-                <p className="text-gray-700">{review.comment}</p>
+                <p>{review.comment}</p>
               </div>
             ))}
           </div>
@@ -185,6 +274,16 @@ export default function ReviewForm({ restaurantName, path }) {
             </span>
           </div>
         </div>
-      </div></>
+      </div>
+
+      {/* Botón flotante para ir a los comentarios */}
+      <button
+        onClick={scrollToReviews}
+        className="fixed bottom-6 right-6 bg-red-600 hover:bg-red-700 text-white p-3 rounded-full shadow-lg transition-all hover:scale-110 z-50 flex items-center justify-center"
+        aria-label="Ver comentarios"
+      >
+        <FaComment size={20} />
+      </button>
+    </>
   );
 }
